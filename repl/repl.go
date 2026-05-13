@@ -1,27 +1,28 @@
 package repl
 
 import (
-	"bufio"
 	"fmt"
-	"os"
+	"io"
 	"strconv"
 	"strings"
+
+	"github.com/chzyer/readline"
 
 	"gocg/graph"
 	"gocg/query"
 )
 
 const (
-	ctrlGreen  = "\033[32m"
-	ctrlReset  = "\033[0m"
+	ctrlGreen = "\033[32m"
+	ctrlReset = "\033[0m"
 )
 
 type State struct {
-	FilterSet map[string]bool
-	IgnoreSet map[string]bool
-	MaxDepth  int
+	FilterSet  map[string]bool
+	IgnoreSet  map[string]bool
+	MaxDepth   int
 	PrintDepth int
-	G         *graph.Graph
+	G          *graph.Graph
 }
 
 const defaultMaxDepth = 15
@@ -37,18 +38,58 @@ func NewState(g *graph.Graph) *State {
 }
 
 func Run(s *State) {
-	scanner := bufio.NewScanner(os.Stdin)
+	rl, err := readline.New(">>> ")
+	if err != nil {
+		return
+	}
+	defer rl.Close()
+
+	rl.Config.AutoComplete = readline.NewPrefixCompleter(
+		readline.PcItem("@",
+			readline.PcItem("filter"),
+			readline.PcItem("ignore"),
+			readline.PcItem("del_fi"),
+			readline.PcItem("del_ig"),
+			readline.PcItem("depth"),
+			readline.PcItem("show"),
+			readline.PcItem("reset"),
+		),
+		readline.PcItem("?", readline.PcItemDynamic(listFunctions(s))),
+		readline.PcItem("!", readline.PcItemDynamic(listFunctions(s))),
+		readline.PcItem("&", readline.PcItemDynamic(listFunctions(s))),
+		readline.PcItemDynamic(listFunctions(s)),
+	)
+
 	for {
-		fmt.Print(">>> ")
-		if !scanner.Scan() {
+		line, err := rl.Readline()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
 			break
 		}
-		line := strings.TrimSpace(scanner.Text())
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 
 		handle(s, line)
+	}
+}
+
+func listFunctions(s *State) func(string) []string {
+	return func(line string) []string {
+		var matches []string
+		lower := strings.ToLower(line)
+		for _, name := range s.G.FullNames {
+			if strings.HasPrefix(strings.ToLower(name), lower) {
+				matches = append(matches, name)
+			}
+			if len(matches) >= 100 {
+				break
+			}
+		}
+		return matches
 	}
 }
 
