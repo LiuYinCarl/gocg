@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"golang.org/x/tools/go/callgraph/cha"
+	"golang.org/x/tools/go/callgraph/vta"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
@@ -60,7 +60,18 @@ func Build(dir string, excludePrefixes []string) (*Graph, *Stats, error) {
 	prog, _ := ssautil.AllPackages(pkgs, ssa.BuilderMode(0))
 	prog.Build()
 
-	cg := cha.CallGraph(prog)
+	shortMap := buildShortMap(pkgs)
+
+	funcs := make(map[*ssa.Function]bool)
+	for _, pkg := range prog.AllPackages() {
+		for _, member := range pkg.Members {
+			if fn, ok := member.(*ssa.Function); ok {
+				funcs[fn] = true
+			}
+		}
+	}
+
+	cg := vta.CallGraph(funcs, nil)
 
 	g := &Graph{
 		CallGraph: make(map[string][]string),
@@ -77,18 +88,19 @@ func Build(dir string, excludePrefixes []string) (*Graph, *Stats, error) {
 			continue
 		}
 
-		callerName := caller.String()
-		if matchesExclude(callerName, excludePrefixes) {
+		if matchesExclude(caller.String(), excludePrefixes) {
 			continue
 		}
 
+		callerName := funcDisplayName(caller, shortMap)
+
 		for _, edge := range node.Out {
 			callee := edge.Callee.Func
-			calleeName := callee.String()
-
-			if matchesExclude(calleeName, excludePrefixes) {
+			if matchesExclude(callee.String(), excludePrefixes) {
 				continue
 			}
+
+			calleeName := funcDisplayName(callee, shortMap)
 
 			g.CallGraph[callerName] = appendUnique(g.CallGraph[callerName], calleeName)
 			g.RefGraph[calleeName] = appendUnique(g.RefGraph[calleeName], callerName)
@@ -123,6 +135,63 @@ func Build(dir string, excludePrefixes []string) (*Graph, *Stats, error) {
 	return g, stats, nil
 }
 
+func buildShortMap(pkgs []*packages.Package) map[string]string {
+	pathToName := make(map[string]string)
+	nameCount := make(map[string]int)
+	seen := make(map[string]bool)
+	var collect func(pkg *packages.Package)
+	collect = func(pkg *packages.Package) {
+		if pkg == nil || seen[pkg.ID] {
+			return
+		}
+		seen[pkg.ID] = true
+		if pkg.PkgPath != "" && pkg.Name != "" {
+			pathToName[pkg.PkgPath] = pkg.Name
+			nameCount[pkg.Name]++
+		}
+		for _, imp := range pkg.Imports {
+			collect(imp)
+		}
+	}
+	for _, pkg := range pkgs {
+		collect(pkg)
+	}
+
+	m := make(map[string]string)
+	for path, name := range pathToName {
+		if nameCount[name] > 1 {
+			parts := strings.Split(path, "/")
+			if len(parts) >= 2 {
+				m[path] = parts[len(parts)-2] + "/" + name
+			} else {
+				m[path] = path
+			}
+		} else {
+			m[path] = name
+		}
+	}
+	return m
+}
+
+func funcDisplayName(fn *ssa.Function, shortMap map[string]string) string {
+	if fn == nil {
+		return ""
+	}
+	full := fn.String()
+	// Sort paths longest-first to avoid partial replacements
+	paths := make([]string, 0, len(shortMap))
+	for p := range shortMap {
+		paths = append(paths, p)
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		return len(paths[i]) > len(paths[j])
+	})
+	for _, path := range paths {
+		full = strings.ReplaceAll(full, path, shortMap[path])
+	}
+	return full
+}
+
 func isProjectPkg(pkg *packages.Package, dir string) bool {
 	for _, f := range pkg.GoFiles {
 		abs, err := filepath.Abs(f)
@@ -146,7 +215,7 @@ func matchesExclude(name string, prefixes []string) bool {
 		if p == "" {
 			continue
 		}
-		if strings.HasPrefix(name, p) {
+		if strings.Contains(name, p) {
 			return true
 		}
 	}
