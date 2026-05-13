@@ -105,21 +105,24 @@ func buildFromSource(absDir string, excludePrefixes []string) (*Graph, *Stats, e
 		RefGraph:  make(map[string][]string),
 	}
 
+	nameSet := make(map[string]bool)
+	edgeCount := 0
+
 	for fn, node := range cg.Nodes {
-		caller := fn
-		if caller == nil {
+		if fn == nil {
 			continue
 		}
 
-		if !isInProject(caller, absDir) {
+		if !isInProject(fn, absDir) {
 			continue
 		}
 
-		if matchesExclude(caller.String(), excludePrefixes) {
+		if matchesExclude(fn.String(), excludePrefixes) {
 			continue
 		}
 
-		callerName := funcDisplayName(caller, shortMap)
+		callerName := funcDisplayName(fn, shortMap)
+		nameSet[callerName] = true
 
 		for _, edge := range node.Out {
 			callee := edge.Callee.Func
@@ -131,16 +134,8 @@ func buildFromSource(absDir string, excludePrefixes []string) (*Graph, *Stats, e
 
 			g.CallGraph[callerName] = appendUnique(g.CallGraph[callerName], calleeName)
 			g.RefGraph[calleeName] = appendUnique(g.RefGraph[calleeName], callerName)
-		}
-	}
-
-	nameSet := make(map[string]bool)
-	for k := range g.CallGraph {
-		nameSet[k] = true
-	}
-	for _, callees := range g.CallGraph {
-		for _, c := range callees {
-			nameSet[c] = true
+			nameSet[calleeName] = true
+			edgeCount++
 		}
 	}
 	for name := range nameSet {
@@ -148,10 +143,10 @@ func buildFromSource(absDir string, excludePrefixes []string) (*Graph, *Stats, e
 	}
 	sort.Strings(g.FullNames)
 
-	edgeCount := 0
-	for _, callees := range g.CallGraph {
-		edgeCount += len(callees)
+	for name := range nameSet {
+		g.FullNames = append(g.FullNames, name)
 	}
+	sort.Strings(g.FullNames)
 
 	stats := &Stats{
 		Packages:  projectPkgs,
