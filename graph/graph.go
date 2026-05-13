@@ -1,6 +1,8 @@
 package graph
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,9 +25,12 @@ type Stats struct {
 	Packages  int
 	Functions int
 	Edges     int
+	Cached    bool
 }
 
-func Build(dir string, excludePrefixes []string) (*Graph, *Stats, error) {
+const cacheVersion = 1
+
+func Build(dir string, excludePrefixes []string, noCache bool) (*Graph, *Stats, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve dir: %w", err)
@@ -35,6 +40,28 @@ func Build(dir string, excludePrefixes []string) (*Graph, *Stats, error) {
 		return nil, nil, fmt.Errorf("directory not found: %s", absDir)
 	}
 
+	cacheFile, _ := cachePath(absDir, excludePrefixes)
+	if !noCache && cacheFile != "" {
+		if g, stats, err := loadCache(cacheFile); err == nil {
+			stats.Cached = true
+			return g, stats, nil
+		}
+	}
+
+	g, stats, err := buildFromSource(absDir, excludePrefixes)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	stats.Cached = false
+	if !noCache && cacheFile != "" {
+		saveCache(cacheFile, g, stats)
+	}
+
+	return g, stats, nil
+}
+
+func buildFromSource(absDir string, excludePrefixes []string) (*Graph, *Stats, error) {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
 			packages.NeedImports | packages.NeedDeps | packages.NeedTypes |
@@ -133,6 +160,115 @@ func Build(dir string, excludePrefixes []string) (*Graph, *Stats, error) {
 	}
 
 	return g, stats, nil
+}
+
+func cachePath(dir string, excludePrefixes []string) (string, error) {
+	h := sha256.New()
+	fmt.Fprintf(h, "v%d\n", cacheVersion)
+	fmt.Fprintf(h, "%s\n", dir)
+	for _, p := range excludePrefixes {
+		fmt.Fprintf(h, "x:%s\n", p)
+	}
+
+	type fileInfo struct {
+		path  string
+		size  int64
+		mtime int64
+	}
+	var files []fileInfo
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			base := filepath.Base(path)
+			if strings.HasPrefix(base, ".") && path != dir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(path, ".go") {
+			files = append(files, fileInfo{path, info.Size(), info.ModTime().UnixNano()})
+		}
+		return nil
+	})
+
+	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
+	for _, fi := range files {
+		fmt.Fprintf(h, "%s:%d:%d\n", fi.path, fi.size, fi.mtime)
+	}
+
+	hash := fmt.Sprintf("%x", h.Sum(nil))
+	cacheDir := filepath.Join(dir, ".gocg-cache")
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return "", err
+	}
+	return filepath.Join(cacheDir, hash+".json"), nil
+}
+
+type cachePayload struct {
+	CallGraph map[string][]string `json:"callgraph"`
+	RefGraph  map[string][]string `json:"refgraph"`
+	FullNames []string            `json:"fullnames"`
+	Packages  int                 `json:"packages"`
+	Functions int                 `json:"functions"`
+	Edges     int                 `json:"edges"`
+}
+
+func loadCache(path string) (*Graph, *Stats, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	var p cachePayload
+	if err := json.Unmarshal(b, &p); err != nil {
+		return nil, nil, err
+	}
+	return &Graph{
+		CallGraph: p.CallGraph,
+		RefGraph:  p.RefGraph,
+		FullNames: p.FullNames,
+	}, &Stats{
+		Packages:  p.Packages,
+		Functions: p.Functions,
+		Edges:     p.Edges,
+	}, nil
+}
+
+func saveCache(path string, g *Graph, stats *Stats) error {
+	p := cachePayload{
+		CallGraph: g.CallGraph,
+		RefGraph:  g.RefGraph,
+		FullNames: g.FullNames,
+		Packages:  stats.Packages,
+		Functions: stats.Functions,
+		Edges:     stats.Edges,
+	}
+	b, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0644)
+}
+
+func ClearCache(dir string) (int, error) {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return 0, err
+	}
+	cacheDir := filepath.Join(absDir, ".gocg-cache")
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return 0, nil
+	}
+	removed := 0
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			os.Remove(filepath.Join(cacheDir, e.Name()))
+			removed++
+		}
+	}
+	return removed, nil
 }
 
 func buildShortMap(pkgs []*packages.Package) map[string]string {
