@@ -5,7 +5,13 @@ A Go call graph analyzer inspired by [clang-callgraph](https://github.com/LiuYin
 ## Installation
 
 ```bash
-git clone <this-repo>
+go install github.com/LiuYinCarl/gocg@latest
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/LiuYinCarl/gocg.git
 cd gocg
 go install .
 ```

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"gocg/graph"
-	"gocg/query"
-	"gocg/repl"
+	"github.com/LiuYinCarl/gocg/graph"
+	"github.com/LiuYinCarl/gocg/query"
+	"github.com/LiuYinCarl/gocg/repl"
 )
 
 func main() {

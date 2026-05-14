@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"gocg/graph"
+	"github.com/LiuYinCarl/gocg/graph"
 )
 
 const (

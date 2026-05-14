@@ -1,4 +1,4 @@
-module gocg
+module github.com/LiuYinCarl/gocg
 
 go 1.26.3
 

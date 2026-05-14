@@ -8,8 +8,8 @@ import (
 
 	"github.com/chzyer/readline"
 
-	"gocg/graph"
-	"gocg/query"
+	"github.com/LiuYinCarl/gocg/graph"
+	"github.com/LiuYinCarl/gocg/query"
 )
 
 const (
