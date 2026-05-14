@@ -30,7 +30,7 @@ func main() {
 		case "-x":
 			i++
 			if i < len(args) {
-				for _, p := range strings.Split(args[i], ",") {
+				for p := range strings.SplitSeq(args[i], ",") {
 					p = strings.TrimSpace(p)
 					if p != "" {
 						excludePrefixes = append(excludePrefixes, p)

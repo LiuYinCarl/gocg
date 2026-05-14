@@ -1,6 +1,7 @@
 package query
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -24,11 +25,23 @@ func Search(g *graph.Graph, keyword string) []string {
 	return matches
 }
 
+func resolveName(g *graph.Graph, check map[string][]string, input string) string {
+	if _, ok := check[input]; ok {
+		return input
+	}
+	matches := Search(g, input)
+	if len(matches) == 1 {
+		return matches[0]
+	}
+	return ""
+}
+
 func PrintCallGraph(g *graph.Graph, fun string, maxDepth int) []string {
 	var buf []string
-	if _, ok := g.CallGraph[fun]; ok {
-		buf = append(buf, colorFunc(fun))
-		printCalls(g, fun, []string{}, 0, maxDepth, &buf)
+	name := resolveName(g, g.CallGraph, fun)
+	if name != "" {
+		buf = append(buf, colorFunc(name))
+		printCalls(g, name, []string{}, 0, maxDepth, &buf)
 	} else {
 		buf = append(buf, ctrlYellow+"matching list:"+ctrlReset)
 		matches := Search(g, fun)
@@ -41,27 +54,30 @@ func PrintCallGraph(g *graph.Graph, fun string, maxDepth int) []string {
 
 func PrintFilterCallGraph(g *graph.Graph, fun string, filterKwds []string, maxDepth int) []string {
 	var buf []string
-	if _, ok := g.CallGraph[fun]; ok {
-		buf = append(buf, colorFunc(fun))
-		filterCalls(g, fun, []string{}, []string{}, filterKwds, 0, maxDepth, &buf)
+	name := resolveName(g, g.CallGraph, fun)
+	if name != "" {
+		buf = append(buf, colorFunc(name))
+		filterCalls(g, name, []string{}, []string{}, filterKwds, 0, maxDepth, &buf)
 	}
 	return buf
 }
 
 func PrintIgnoreCallGraph(g *graph.Graph, fun string, ignoreKwds []string, maxDepth int) []string {
 	var buf []string
-	if _, ok := g.CallGraph[fun]; ok {
-		buf = append(buf, colorFunc(fun))
-		ignoreCalls(g, fun, []string{}, ignoreKwds, 0, maxDepth, &buf)
+	name := resolveName(g, g.CallGraph, fun)
+	if name != "" {
+		buf = append(buf, colorFunc(name))
+		ignoreCalls(g, name, []string{}, ignoreKwds, 0, maxDepth, &buf)
 	}
 	return buf
 }
 
 func PrintRefGraph(g *graph.Graph, fun string, maxDepth int) []string {
 	var buf []string
-	if _, ok := g.RefGraph[fun]; ok {
-		buf = append(buf, fun)
-		printRefs(g, fun, []string{}, 0, maxDepth, &buf)
+	name := resolveName(g, g.RefGraph, fun)
+	if name != "" {
+		buf = append(buf, name)
+		printRefs(g, name, []string{}, 0, maxDepth, &buf)
 	}
 	return buf
 }
@@ -84,7 +100,7 @@ func printCalls(g *graph.Graph, fun string, seen []string, depth, maxDepth int, 
 		line := prefix + c
 		*buf = append(*buf, line)
 
-		if contains(seen, c) {
+		if slices.Contains(seen, c) {
 			continue
 		}
 		seen = append(seen, c)
@@ -121,7 +137,7 @@ func filterCalls(g *graph.Graph, fun string, stack, seen, filterKwds []string, d
 			}
 		}
 
-		if contains(seen, c) {
+		if slices.Contains(seen, c) {
 			stack = stack[:len(stack)-1]
 			continue
 		}
@@ -158,7 +174,7 @@ func ignoreCalls(g *graph.Graph, fun string, seen []string, ignoreKwds []string,
 		line := prefix + c
 		*buf = append(*buf, line)
 
-		if contains(seen, c) {
+		if slices.Contains(seen, c) {
 			continue
 		}
 		seen = append(seen, c)
@@ -182,7 +198,7 @@ func printRefs(g *graph.Graph, fun string, seen []string, depth, maxDepth int, b
 		line := prefix + r
 		*buf = append(*buf, line)
 
-		if contains(seen, r) {
+		if slices.Contains(seen, r) {
 			continue
 		}
 		seen = append(seen, r)
@@ -190,13 +206,4 @@ func printRefs(g *graph.Graph, fun string, seen []string, depth, maxDepth int, b
 			printRefs(g, r, seen, depth+1, maxDepth, buf)
 		}
 	}
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
 }

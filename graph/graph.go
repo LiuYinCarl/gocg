@@ -89,6 +89,17 @@ func buildFromSource(absDir string, excludePrefixes []string) (*Graph, *Stats, e
 
 	shortMap := buildShortMap(pkgs)
 
+	sortedPaths := make([]string, 0, len(shortMap))
+	for p := range shortMap {
+		sortedPaths = append(sortedPaths, p)
+	}
+	sort.Slice(sortedPaths, func(i, j int) bool {
+		return len(sortedPaths[i]) > len(sortedPaths[j])
+	})
+
+	displayCache := make(map[string]string)
+	excludeCache := make(map[string]bool)
+
 	funcs := make(map[*ssa.Function]bool)
 	for _, pkg := range prog.AllPackages() {
 		for _, member := range pkg.Members {
@@ -100,11 +111,8 @@ func buildFromSource(absDir string, excludePrefixes []string) (*Graph, *Stats, e
 
 	cg := vta.CallGraph(funcs, nil)
 
-	g := &Graph{
-		CallGraph: make(map[string][]string),
-		RefGraph:  make(map[string][]string),
-	}
-
+	callTemp := make(map[string]map[string]struct{})
+	refTemp := make(map[string]map[string]struct{})
 	nameSet := make(map[string]bool)
 	edgeCount := 0
 
@@ -117,31 +125,72 @@ func buildFromSource(absDir string, excludePrefixes []string) (*Graph, *Stats, e
 			continue
 		}
 
-		if matchesExclude(fn.String(), excludePrefixes) {
+		fnStr := fn.String()
+		if _, ok := excludeCache[fnStr]; !ok {
+			excludeCache[fnStr] = matchesExclude(fnStr, excludePrefixes)
+		}
+		if excludeCache[fnStr] {
 			continue
 		}
 
-		callerName := funcDisplayName(fn, shortMap)
+		if _, ok := displayCache[fnStr]; !ok {
+			displayCache[fnStr] = funcDisplayName(fnStr, shortMap, sortedPaths)
+		}
+		callerName := displayCache[fnStr]
 		nameSet[callerName] = true
 
 		for _, edge := range node.Out {
 			callee := edge.Callee.Func
-			if matchesExclude(callee.String(), excludePrefixes) {
+			calleeStr := callee.String()
+			if _, ok := excludeCache[calleeStr]; !ok {
+				excludeCache[calleeStr] = matchesExclude(calleeStr, excludePrefixes)
+			}
+			if excludeCache[calleeStr] {
 				continue
 			}
 
-			calleeName := funcDisplayName(callee, shortMap)
+			if _, ok := displayCache[calleeStr]; !ok {
+				displayCache[calleeStr] = funcDisplayName(calleeStr, shortMap, sortedPaths)
+			}
+			calleeName := displayCache[calleeStr]
 
-			g.CallGraph[callerName] = appendUnique(g.CallGraph[callerName], calleeName)
-			g.RefGraph[calleeName] = appendUnique(g.RefGraph[calleeName], callerName)
+			if callTemp[callerName] == nil {
+				callTemp[callerName] = make(map[string]struct{})
+			}
+			callTemp[callerName][calleeName] = struct{}{}
+
+			if refTemp[calleeName] == nil {
+				refTemp[calleeName] = make(map[string]struct{})
+			}
+			refTemp[calleeName][callerName] = struct{}{}
+
 			nameSet[calleeName] = true
 			edgeCount++
 		}
 	}
-	for name := range nameSet {
-		g.FullNames = append(g.FullNames, name)
+
+	g := &Graph{
+		CallGraph: make(map[string][]string, len(callTemp)),
+		RefGraph:  make(map[string][]string, len(refTemp)),
 	}
-	sort.Strings(g.FullNames)
+
+	for caller, callees := range callTemp {
+		slice := make([]string, 0, len(callees))
+		for c := range callees {
+			slice = append(slice, c)
+		}
+		sort.Strings(slice)
+		g.CallGraph[caller] = slice
+	}
+
+	for callee, callers := range refTemp {
+		slice := make([]string, 0, len(callers))
+		for c := range callers {
+			slice = append(slice, c)
+		}
+		sort.Strings(slice)
+		g.RefGraph[callee] = slice
+	}
 
 	for name := range nameSet {
 		g.FullNames = append(g.FullNames, name)
@@ -304,20 +353,8 @@ func buildShortMap(pkgs []*packages.Package) map[string]string {
 	return m
 }
 
-func funcDisplayName(fn *ssa.Function, shortMap map[string]string) string {
-	if fn == nil {
-		return ""
-	}
-	full := fn.String()
-	// Sort paths longest-first to avoid partial replacements
-	paths := make([]string, 0, len(shortMap))
-	for p := range shortMap {
-		paths = append(paths, p)
-	}
-	sort.Slice(paths, func(i, j int) bool {
-		return len(paths[i]) > len(paths[j])
-	})
-	for _, path := range paths {
+func funcDisplayName(full string, shortMap map[string]string, sortedPaths []string) string {
+	for _, path := range sortedPaths {
 		full = strings.ReplaceAll(full, path, shortMap[path])
 	}
 	return full
@@ -351,13 +388,4 @@ func matchesExclude(name string, prefixes []string) bool {
 		}
 	}
 	return false
-}
-
-func appendUnique(slice []string, item string) []string {
-	for _, s := range slice {
-		if s == item {
-			return slice
-		}
-	}
-	return append(slice, item)
 }
