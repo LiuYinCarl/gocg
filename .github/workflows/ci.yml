@@ -23,7 +23,7 @@ jobs:
           cache: true
 
       - name: gofmt
-        shell: bash
+        if: matrix.os == 'ubuntu-latest' && matrix.go == 'stable'
         run: test -z "$(gofmt -l .)"
 
       - name: go mod tidy check
@@ -44,7 +44,8 @@ jobs:
         shell: bash
         run: |
           go build -o gocg .
-          ./gocg . --lookup main.main | grep -q graph.Build
+          ./gocg . --lookup main.main > lookup.txt
+          grep -q graph.Build lookup.txt
           printf '@ show\n' | ./gocg . >/dev/null
           ./gocg . --clear-cache >/dev/null
         if: matrix.os != 'windows-latest'
