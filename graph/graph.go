@@ -26,6 +26,7 @@ type Stats struct {
 	Functions int
 	Edges     int
 	Cached    bool
+	Warnings  []string
 }
 
 const cacheVersion = 1
@@ -38,6 +39,9 @@ func Build(dir string, excludePrefixes []string, noCache bool) (*Graph, *Stats, 
 
 	if _, err := os.Stat(absDir); err != nil {
 		return nil, nil, fmt.Errorf("directory not found: %s", absDir)
+	}
+	if resolved, err := filepath.EvalSymlinks(absDir); err == nil {
+		absDir = resolved
 	}
 
 	cacheFile, _ := cachePath(absDir, excludePrefixes)
@@ -75,13 +79,24 @@ func buildFromSource(absDir string, excludePrefixes []string) (*Graph, *Stats, e
 	}
 
 	projectPkgs := 0
+	var warnings []string
+	errCount := 0
 	for _, pkg := range pkgs {
+		for _, e := range pkg.Errors {
+			errCount++
+			if len(warnings) < 20 {
+				warnings = append(warnings, fmt.Sprintf("%s: %s", pkg.PkgPath, e))
+			}
+		}
 		if len(pkg.Errors) > 0 {
 			continue
 		}
 		if isProjectPkg(pkg, absDir) {
 			projectPkgs++
 		}
+	}
+	if errCount > len(warnings) {
+		warnings = append(warnings, fmt.Sprintf("... and %d more package errors", errCount-len(warnings)))
 	}
 
 	prog, _ := ssautil.AllPackages(pkgs, ssa.BuilderMode(0))
@@ -201,15 +216,25 @@ func buildFromSource(absDir string, excludePrefixes []string) (*Graph, *Stats, e
 		Packages:  projectPkgs,
 		Functions: len(nameSet),
 		Edges:     edgeCount,
+		Warnings:  warnings,
 	}
 
 	return g, stats, nil
 }
 
+func dirCacheHash(dir string) string {
+	sum := sha256.Sum256([]byte(dir))
+	return fmt.Sprintf("%x", sum)[:16]
+}
+
 func cachePath(dir string, excludePrefixes []string) (string, error) {
+	root, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+
 	h := sha256.New()
 	fmt.Fprintf(h, "v%d\n", cacheVersion)
-	fmt.Fprintf(h, "%s\n", dir)
 	for _, p := range excludePrefixes {
 		fmt.Fprintf(h, "x:%s\n", p)
 	}
@@ -242,12 +267,12 @@ func cachePath(dir string, excludePrefixes []string) (string, error) {
 		fmt.Fprintf(h, "%s:%d:%d\n", fi.path, fi.size, fi.mtime)
 	}
 
-	hash := fmt.Sprintf("%x", h.Sum(nil))
-	cacheDir := filepath.Join(dir, ".gocg-cache")
+	hash := fmt.Sprintf("%x", h.Sum(nil))[:32]
+	cacheDir := filepath.Join(root, "gocg")
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return "", err
 	}
-	return filepath.Join(cacheDir, hash+".json"), nil
+	return filepath.Join(cacheDir, dirCacheHash(dir)+"-"+hash+".json"), nil
 }
 
 type cachePayload struct {
@@ -257,6 +282,7 @@ type cachePayload struct {
 	Packages  int                 `json:"packages"`
 	Functions int                 `json:"functions"`
 	Edges     int                 `json:"edges"`
+	Warnings  []string            `json:"warnings,omitempty"`
 }
 
 func loadCache(path string) (*Graph, *Stats, error) {
@@ -276,6 +302,7 @@ func loadCache(path string) (*Graph, *Stats, error) {
 		Packages:  p.Packages,
 		Functions: p.Functions,
 		Edges:     p.Edges,
+		Warnings:  p.Warnings,
 	}, nil
 }
 
@@ -287,8 +314,9 @@ func saveCache(path string, g *Graph, stats *Stats) error {
 		Packages:  stats.Packages,
 		Functions: stats.Functions,
 		Edges:     stats.Edges,
+		Warnings:  stats.Warnings,
 	}
-	b, err := json.MarshalIndent(p, "", "  ")
+	b, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
@@ -300,17 +328,33 @@ func ClearCache(dir string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	cacheDir := filepath.Join(absDir, ".gocg-cache")
-	entries, err := os.ReadDir(cacheDir)
-	if err != nil {
-		return 0, nil
+	if resolved, err := filepath.EvalSymlinks(absDir); err == nil {
+		absDir = resolved
 	}
+
 	removed := 0
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".json") {
-			os.Remove(filepath.Join(cacheDir, e.Name()))
-			removed++
+	if root, err := os.UserCacheDir(); err == nil {
+		cacheDir := filepath.Join(root, "gocg")
+		if entries, err := os.ReadDir(cacheDir); err == nil {
+			prefix := dirCacheHash(absDir) + "-"
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), prefix) && strings.HasSuffix(e.Name(), ".json") {
+					if os.Remove(filepath.Join(cacheDir, e.Name())) == nil {
+						removed++
+					}
+				}
+			}
 		}
+	}
+
+	legacy := filepath.Join(absDir, ".gocg-cache")
+	if entries, err := os.ReadDir(legacy); err == nil {
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".json") {
+				removed++
+			}
+		}
+		os.RemoveAll(legacy)
 	}
 	return removed, nil
 }
@@ -360,13 +404,21 @@ func funcDisplayName(full string, shortMap map[string]string, sortedPaths []stri
 	return full
 }
 
+func pathInDir(dir, file string) bool {
+	rel, err := filepath.Rel(dir, file)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func isProjectPkg(pkg *packages.Package, dir string) bool {
 	for _, f := range pkg.GoFiles {
 		abs, err := filepath.Abs(f)
 		if err != nil {
 			continue
 		}
-		if strings.HasPrefix(abs, dir) {
+		if pathInDir(dir, abs) {
 			return true
 		}
 	}
@@ -375,7 +427,7 @@ func isProjectPkg(pkg *packages.Package, dir string) bool {
 
 func isInProject(fn *ssa.Function, dir string) bool {
 	pos := fn.Prog.Fset.Position(fn.Pos())
-	return strings.HasPrefix(pos.Filename, dir)
+	return pos.Filename != "" && pathInDir(dir, pos.Filename)
 }
 
 func matchesExclude(name string, prefixes []string) bool {

@@ -3,19 +3,27 @@ package repl
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/chzyer/readline"
+	"github.com/muesli/termenv"
 
 	"github.com/LiuYinCarl/gocg/graph"
 	"github.com/LiuYinCarl/gocg/query"
 )
 
-const (
+var (
 	ctrlGreen = "\033[32m"
 	ctrlReset = "\033[0m"
 )
+
+func init() {
+	if termenv.EnvColorProfile() == termenv.Ascii {
+		ctrlGreen, ctrlReset = "", ""
+	}
+}
 
 type State struct {
 	FilterSet  map[string]bool
@@ -109,50 +117,8 @@ Usage:
 
 func handle(s *State, line string) {
 	switch {
-	case line == "@":
-		fmt.Print(ctrlGreen, usageMsg, ctrlReset)
-	case line == "@ show":
-		fmt.Printf("%sfilter set: %v%s\n", ctrlGreen, setKeys(s.FilterSet), ctrlReset)
-		fmt.Printf("%signore set: %v%s\n", ctrlGreen, setKeys(s.IgnoreSet), ctrlReset)
-		fmt.Printf("%sprint depth: %d%s\n", ctrlGreen, s.PrintDepth, ctrlReset)
-		fmt.Printf("%smax print depth: %d%s\n", ctrlGreen, s.MaxDepth, ctrlReset)
-	case line == "@ reset":
-		s.FilterSet = make(map[string]bool)
-		s.IgnoreSet = make(map[string]bool)
-		s.PrintDepth = defaultMaxDepth
-		fmt.Println("reset finish")
-	case strings.HasPrefix(line, "@ filter "):
-		args := strings.Fields(line)
-		for _, kw := range args[2:] {
-			s.FilterSet[kw] = true
-		}
-		fmt.Printf("update filter set:%s %v%s\n", ctrlGreen, setKeys(s.FilterSet), ctrlReset)
-	case strings.HasPrefix(line, "@ ignore "):
-		args := strings.Fields(line)
-		for _, kw := range args[2:] {
-			s.IgnoreSet[kw] = true
-		}
-		fmt.Printf("update ignore set:%s %v%s\n", ctrlGreen, setKeys(s.IgnoreSet), ctrlReset)
-	case strings.HasPrefix(line, "@ del_fi "):
-		args := strings.Fields(line)
-		for _, kw := range args[2:] {
-			delete(s.FilterSet, kw)
-		}
-	case strings.HasPrefix(line, "@ del_ig "):
-		args := strings.Fields(line)
-		for _, kw := range args[2:] {
-			delete(s.IgnoreSet, kw)
-		}
-	case strings.HasPrefix(line, "@ depth "):
-		args := strings.Fields(line)
-		if len(args) < 3 {
-			return
-		}
-		d, err := strconv.Atoi(args[2])
-		if err != nil || d <= 0 || d > s.MaxDepth {
-			return
-		}
-		s.PrintDepth = d
+	case strings.HasPrefix(line, "@"):
+		handleCommand(s, line)
 	case strings.HasPrefix(line, "? "):
 		parts := strings.SplitN(line, " ", 2)
 		if len(parts) < 2 {
@@ -197,10 +163,65 @@ func handle(s *State, line string) {
 	}
 }
 
+func handleCommand(s *State, line string) {
+	args := strings.Fields(line)
+	if len(args) < 2 {
+		fmt.Print(ctrlGreen, usageMsg, ctrlReset)
+		return
+	}
+	switch args[1] {
+	case "show":
+		fmt.Printf("%sfilter set: %v%s\n", ctrlGreen, setKeys(s.FilterSet), ctrlReset)
+		fmt.Printf("%signore set: %v%s\n", ctrlGreen, setKeys(s.IgnoreSet), ctrlReset)
+		fmt.Printf("%sprint depth: %d%s\n", ctrlGreen, s.PrintDepth, ctrlReset)
+		fmt.Printf("%smax print depth: %d%s\n", ctrlGreen, s.MaxDepth, ctrlReset)
+	case "reset":
+		s.FilterSet = make(map[string]bool)
+		s.IgnoreSet = make(map[string]bool)
+		s.PrintDepth = defaultMaxDepth
+		fmt.Println("reset finish")
+	case "filter":
+		for _, kw := range args[2:] {
+			s.FilterSet[kw] = true
+		}
+		fmt.Printf("update filter set:%s %v%s\n", ctrlGreen, setKeys(s.FilterSet), ctrlReset)
+	case "ignore":
+		for _, kw := range args[2:] {
+			s.IgnoreSet[kw] = true
+		}
+		fmt.Printf("update ignore set:%s %v%s\n", ctrlGreen, setKeys(s.IgnoreSet), ctrlReset)
+	case "del_fi":
+		for _, kw := range args[2:] {
+			delete(s.FilterSet, kw)
+		}
+		fmt.Printf("update filter set:%s %v%s\n", ctrlGreen, setKeys(s.FilterSet), ctrlReset)
+	case "del_ig":
+		for _, kw := range args[2:] {
+			delete(s.IgnoreSet, kw)
+		}
+		fmt.Printf("update ignore set:%s %v%s\n", ctrlGreen, setKeys(s.IgnoreSet), ctrlReset)
+	case "depth":
+		if len(args) < 3 {
+			fmt.Println("usage: @ depth N")
+			return
+		}
+		d, err := strconv.Atoi(args[2])
+		if err != nil || d <= 0 || d > s.MaxDepth {
+			fmt.Printf("invalid depth %q (valid range: 1-%d)\n", args[2], s.MaxDepth)
+			return
+		}
+		s.PrintDepth = d
+		fmt.Printf("print depth: %d\n", d)
+	default:
+		fmt.Print(ctrlGreen, usageMsg, ctrlReset)
+	}
+}
+
 func setKeys(m map[string]bool) []string {
-	var keys []string
+	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
 	}
+	sort.Strings(keys)
 	return keys
 }

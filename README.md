@@ -1,5 +1,7 @@
 # gocg
 
+[![CI](https://github.com/LiuYinCarl/gocg/actions/workflows/ci.yml/badge.svg)](https://github.com/LiuYinCarl/gocg/actions/workflows/ci.yml)
+
 A Go call graph analyzer inspired by [clang-callgraph](https://github.com/LiuYinCarl/clang-callgraph). Uses `golang.org/x/tools` (VTA, SSA, packages) to build precise call graphs for Go codebases, with an interactive REPL for exploration.
 
 ## Installation
@@ -16,13 +18,16 @@ cd gocg
 go install .
 ```
 
-Requires Go 1.21+.
+Requires Go 1.25+.
 
 ## Quick Start
 
 ```bash
 # Analyze a Go project, enter interactive REPL
 gocg /path/to/your/go/project
+
+# Interactive TUI (bubble tea): filter list + live call tree pane
+gocg /path/to/your/go/project --tui
 
 # Single lookup (non-interactive)
 gocg /path/to/your/go/project --lookup 'pkg.FuncName'
@@ -52,7 +57,17 @@ gocg . --clear-cache
 >>> @ reset                     # reset all config
 ```
 
-Tab completion is supported for function names and `@` subcommands.
+Tab completion is supported for function names and `@` subcommands. ANSI colors are automatically disabled when output is not a terminal, `NO_COLOR`/`TERM=dumb` is set, or the console lacks VT support (legacy Windows cmd).
+
+## Interactive TUI
+
+Run with `--tui` to get a bubble tea interface: an input box on top, a live-filtered function list on the left, and the call tree on the right.
+
+- Type to filter the function list (case-insensitive substring); `↑`/`↓` move the selection, `enter` renders the tree for the selected function
+- `? func`, `! func`, `& func` prefixes and `@ filter/ignore/del_fi/del_ig/depth/show/reset` commands work exactly like the REPL (press `enter` to apply)
+- `tab` or `esc` moves focus from the input box to the tree pane; `tab`, `/`, or `i` moves back; scroll the tree with `pgup`/`pgdown` (or any navigation key when the pane is focused)
+- `q` quits when the tree pane is focused; `ctrl+c` always quits
+- The call graph is built asynchronously with a spinner while loading
 
 ## How It Works
 
@@ -60,7 +75,7 @@ Tab completion is supported for function names and `@` subcommands.
 2. **SSA**: `go/ssa` builds static single-assignment form
 3. **VTA**: `go/callgraph/vta` computes a precise call graph (no false-positive interface calls like CHA)
 4. **Filter**: Only functions defined under the project directory are expanded; external calls appear as leaf nodes
-5. **Cache**: Results are cached in `.gocg-cache/` under the project directory, keyed by SHA256 of all `.go` file mtimes/sizes
+5. **Cache**: Results are cached in the OS user cache directory (`~/.cache/gocg/` on Linux, `~/Library/Caches/gocg/` on macOS, `%LocalAppData%\gocg\` on Windows), keyed by SHA256 of the project path, exclude prefixes, and all `.go` file mtimes/sizes. Packages with load errors are reported as warnings on stderr.
 
 ## CLI Flags
 
@@ -69,8 +84,9 @@ Tab completion is supported for function names and `@` subcommands.
 | `<directory>` | Go project directory to analyze (default: `.`) |
 | `-x p1,p2,...` | Exclude functions whose full import path contains any of these substrings |
 | `--lookup func` | Print call graph for a function and exit (no REPL) |
+| `--tui` | Interactive TUI (bubble tea) instead of the REPL |
 | `--no-cache` | Skip reading/writing cache |
-| `--clear-cache` | Remove all cached files and exit |
+| `--clear-cache` | Remove cached results for the project (also cleans up the legacy `.gocg-cache/` directory) |
 
 ## Comparison with clang-callgraph
 
@@ -80,6 +96,7 @@ Tab completion is supported for function names and `@` subcommands.
 | Input | `compile_commands.json` / `.cpp` | Go project directory |
 | Call graph algorithm | Clang AST walk | VTA (Variable Type Analysis) |
 | Interactive REPL | ✅ | ✅ |
+| Interactive TUI (bubble tea) | ❌ | ✅ |
 | Filter / Ignore / Ref | ✅ | ✅ |
 | Tab completion | ✅ | ✅ |
 | Cache | ✅ | ✅ |
