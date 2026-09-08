@@ -75,6 +75,7 @@ All output is tree-formatted with ANSI color escapes, gated by `termenv.EnvColor
 - **Green** (`\033[32m`, `ctrlGreen`): tree branches and root function names in call graph output
 - **Red** (`\033[31m`, `ctrlRed`): tree branches in reverse reference output (`printRefs`)
 - **Yellow** (`\033[33m`, `ctrlYellow`): search result headers ("matching list:")
+- **Cyan** (`\033[36m`, `ctrlCyan`) + **Gray** (`\033[90m`, `ctrlGray`): leaf function names via `colorName` — gray for the path prefix up to the last `/` (usually empty, since display names are short), cyan for the rest
 
 **Modes** (called from repl/main/tui):
 | Function | Purpose |
@@ -129,9 +130,10 @@ Uses `charmbracelet/bubbletea` + `bubbles` (textinput, viewport, spinner) + `lip
 - Typing filters `FullNames` case-insensitively (substring, capped at 200 matches) against a precomputed lowercased copy, only when the input actually changed; `↑`/`↓` move selection; `enter` renders the tree for the selected function — trees are **not** re-rendered on every cursor move (bounded-cost UX).
 - `?`/`!`/`&` input prefixes map to `query.PrintFilterCallGraph` / `PrintIgnoreCallGraph` / `PrintRefGraph`; the mode is captured at lock time (`lockedMode`) so later `@` commands don't reset the tree's mode. `@` commands (`filter`/`ignore`/`del_fi`/`del_ig`/`depth`/`show`/`reset`) mirror the REPL and apply on `enter`, with feedback in the status bar; the tree re-renders only after tree-affecting commands (never after `@ show`).
 - Focus: input box by default; `tab`/`esc` moves focus to the tree pane (scrolls with any viewport key, `q` quits); `tab`/`/`/`i` returns to the input. `ctrl+c` quits from anywhere.
+- Horizontal scroll: bubbles viewport is vertical-only, so the model keeps the raw `treeLines` plus `hOffset`/`maxTreeWidth`; `syncTree` re-feeds the viewport with each line pre-cut by `ansi.Cut(line, hOffset, hOffset+vp.Width)` (ANSI-aware, colors survive). Tree-pane keys `←`/`→` (or `h`/`l`) scroll by `hScrollStep` (8), the title shows a `←+N` indicator when offset, and `resizeViewport` re-clamps via `scrollH(0)`. `y` copies the whole tree to the clipboard (`atotto/clipboard`) with ANSI codes stripped (`ansi.Strip`), reporting `copied N lines (M bytes)` in the status bar.
 - The model keeps its own `filterSet`/`ignoreSet`/`printDepth` (same semantics as `repl.State`, deliberately not shared, including the `maxDepth = 15` clamp on `@ depth`).
 
-`query.Print*` output includes ANSI colors, which the viewport renders as-is.
+`query.Print*` output includes ANSI colors, which the viewport renders as-is (horizontal scrolling cuts them with `charmbracelet/x/ansi`, never bytewise).
 
 ## CLI Flags (parsed in `main.go`)
 
@@ -143,6 +145,8 @@ Uses `charmbracelet/bubbletea` + `bubbles` (textinput, viewport, spinner) + `lip
 | `--tui` | Bubble tea TUI instead of the REPL (graph built async inside the TUI) |
 | `--no-cache` | Skip cache read/write |
 | `--clear-cache` | Remove cached results for the project and exit (also removes legacy `<dir>/.gocg-cache/`) |
+| `--version`, `-v` | Print version and exit. Version source: ldflags `-X main.version` (release.yml injects the tag), else `debug.ReadBuildInfo()` — module version for `go install @vX`, short vcs revision + time for checkout builds |
+| `--help`, `-h` | Print usage to stdout and exit |
 
 Unknown flags, missing flag values, and multiple positional directories are hard errors (stderr + exit 1). `Stats.Warnings` (go/packages load errors) are printed to stderr after the build.
 

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -12,10 +13,50 @@ import (
 	"github.com/LiuYinCarl/gocg/tui"
 )
 
+var version = ""
+
+func versionString() string {
+	if version != "" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	var rev, revTime string
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.time":
+			revTime = s.Value
+		}
+	}
+	if rev == "" {
+		return "unknown"
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if revTime != "" {
+		return rev + " (" + revTime + ")"
+	}
+	return rev
+}
+
+func usage(w *os.File) {
+	fmt.Fprintf(w, "usage: %s <directory> [-x prefix1,prefix2] [--lookup func] [--tui] [--no-cache] [--clear-cache]\n", os.Args[0])
+	fmt.Fprintln(w, "       --version, -v  print version and exit")
+	fmt.Fprintln(w, "       --help, -h     print this help and exit")
+}
+
 func main() {
 	args := os.Args[1:]
 	if len(args) < 1 {
-		fmt.Fprintf(os.Stderr, "usage: %s <directory> [-x prefix1,prefix2] [--lookup func] [--tui] [--no-cache] [--clear-cache]\n", os.Args[0])
+		usage(os.Stderr)
 		os.Exit(1)
 	}
 
@@ -55,6 +96,12 @@ func main() {
 			clearCache = true
 		case "--tui":
 			tuiMode = true
+		case "--version", "-v":
+			fmt.Printf("gocg %s\n", versionString())
+			os.Exit(0)
+		case "--help", "-h":
+			usage(os.Stdout)
+			os.Exit(0)
 		default:
 			if strings.HasPrefix(args[i], "-") {
 				fmt.Fprintf(os.Stderr, "error: unknown flag %s\n", args[i])

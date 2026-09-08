@@ -66,6 +66,7 @@ Run with `--tui` to get a bubble tea interface: an input box on top, a live-filt
 - Type to filter the function list (case-insensitive substring); `↑`/`↓` move the selection, `enter` renders the tree for the selected function
 - `? func`, `! func`, `& func` prefixes and `@ filter/ignore/del_fi/del_ig/depth/show/reset` commands work exactly like the REPL (press `enter` to apply)
 - `tab` or `esc` moves focus from the input box to the tree pane; `tab`, `/`, or `i` moves back; scroll the tree with `pgup`/`pgdown` (or any navigation key when the pane is focused)
+- When the tree pane is focused: `←`/`→` (or `h`/`l`) scroll long lines horizontally (the title shows a `←+N` offset indicator), `y` copies the whole call tree to the clipboard (colors stripped)
 - `q` quits when the tree pane is focused; `ctrl+c` always quits
 - The call graph is built asynchronously with a spinner while loading
 
@@ -87,6 +88,8 @@ Run with `--tui` to get a bubble tea interface: an input box on top, a live-filt
 | `--tui` | Interactive TUI (bubble tea) instead of the REPL |
 | `--no-cache` | Skip reading/writing cache |
 | `--clear-cache` | Remove cached results for the project (also cleans up the legacy `.gocg-cache/` directory) |
+| `--version`, `-v` | Print version and exit |
+| `--help`, `-h` | Print usage and exit |
 
 ## Comparison with clang-callgraph
 

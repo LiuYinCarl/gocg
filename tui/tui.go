@@ -7,11 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/LiuYinCarl/gocg/graph"
 	"github.com/LiuYinCarl/gocg/query"
@@ -21,6 +23,7 @@ const (
 	defaultPrintDepth = 15
 	maxDepth          = 15
 	maxMatches        = 200
+	hScrollStep       = 8
 )
 
 type uiState int
@@ -67,6 +70,10 @@ type model struct {
 	locked     string
 	lockedMode string
 	status     string
+
+	treeLines    []string
+	hOffset      int
+	maxTreeWidth int
 
 	width  int
 	height int
@@ -194,6 +201,15 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "tab", "/", "i":
 			m.vpFocus = false
 			return m, m.input.Focus()
+		case "left", "h":
+			m.scrollH(-hScrollStep)
+			return m, nil
+		case "right", "l":
+			m.scrollH(hScrollStep)
+			return m, nil
+		case "y":
+			m.copyTree()
+			return m, nil
 		}
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
@@ -269,6 +285,9 @@ func (m *model) resizeViewport() {
 	}
 	m.vp.Width = w
 	m.vp.Height = m.listRows()
+	if len(m.treeLines) > 0 {
+		m.scrollH(0)
+	}
 }
 
 func (m *model) leftWidth() int {
@@ -360,8 +379,58 @@ func (m *model) renderTree() {
 	default:
 		lines = query.PrintCallGraph(m.g, m.locked, m.printDepth)
 	}
-	m.vp.SetContent(strings.Join(lines, "\n"))
-	m.vp.GotoTop()
+	m.treeLines = lines
+	m.hOffset = 0
+	m.maxTreeWidth = 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > m.maxTreeWidth {
+			m.maxTreeWidth = w
+		}
+	}
+	m.syncTree(true)
+}
+
+func (m *model) syncTree(gotoTop bool) {
+	shifted := make([]string, len(m.treeLines))
+	right := m.hOffset + m.vp.Width
+	for i, l := range m.treeLines {
+		shifted[i] = ansi.Cut(l, m.hOffset, right)
+	}
+	m.vp.SetContent(strings.Join(shifted, "\n"))
+	if gotoTop {
+		m.vp.GotoTop()
+	}
+}
+
+func (m *model) scrollH(delta int) {
+	if len(m.treeLines) == 0 {
+		return
+	}
+	m.hOffset += delta
+	maxOff := m.maxTreeWidth - m.vp.Width
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if m.hOffset > maxOff {
+		m.hOffset = maxOff
+	}
+	if m.hOffset < 0 {
+		m.hOffset = 0
+	}
+	m.syncTree(false)
+}
+
+func (m *model) copyTree() {
+	if len(m.treeLines) == 0 {
+		m.status = "no tree to copy"
+		return
+	}
+	text := ansi.Strip(strings.Join(m.treeLines, "\n"))
+	if err := clipboard.WriteAll(text); err != nil {
+		m.status = "copy failed: " + err.Error()
+		return
+	}
+	m.status = fmt.Sprintf("copied %d lines (%d bytes)", len(m.treeLines), len(text))
 }
 
 func (m *model) handleCommand(line string) {
@@ -481,6 +550,9 @@ func (m *model) renderViewport() string {
 	title := ""
 	if m.locked != "" {
 		title = m.locked
+		if m.hOffset > 0 {
+			title += fmt.Sprintf("  ←+%d", m.hOffset)
+		}
 	}
 	content := m.vp.View()
 	if title != "" {
@@ -501,7 +573,7 @@ func (m *model) statusLine() string {
 	}
 	left += fmt.Sprintf(" | filter:%v ignore:%v depth:%d",
 		sortedKeys(m.filterSet), sortedKeys(m.ignoreSet), m.printDepth)
-	right := "tab:pane enter:tree ↑/↓:move ctrl+c:quit"
+	right := "tab:pane enter:tree ↑↓/←→:scroll y:copy q:quit"
 	line := left + "  |  " + right
 	if m.status != "" {
 		line = m.status + "  |  " + left

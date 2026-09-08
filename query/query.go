@@ -13,12 +13,14 @@ var (
 	ctrlGreen  = "\033[32m"
 	ctrlRed    = "\033[31m"
 	ctrlYellow = "\033[33m"
+	ctrlCyan   = "\033[36m"
+	ctrlGray   = "\033[90m"
 	ctrlReset  = "\033[0m"
 )
 
 func init() {
 	if termenv.EnvColorProfile() == termenv.Ascii {
-		ctrlGreen, ctrlRed, ctrlYellow, ctrlReset = "", "", "", ""
+		ctrlGreen, ctrlRed, ctrlYellow, ctrlCyan, ctrlGray, ctrlReset = "", "", "", "", "", ""
 	}
 }
 
@@ -97,6 +99,19 @@ func colorFunc(name string) string {
 	return ctrlGreen + name + ctrlReset
 }
 
+func colorName(name string) string {
+	if ctrlCyan == "" {
+		return name
+	}
+	prefix := ""
+	rest := name
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		prefix = name[:i+1]
+		rest = name[i+1:]
+	}
+	return ctrlGray + prefix + ctrlReset + ctrlCyan + rest + ctrlReset
+}
+
 func treePrefix(last []bool, isLast bool, color string) string {
 	var b strings.Builder
 	for _, l := range last {
@@ -133,7 +148,7 @@ func printCalls(g *graph.Graph, fun string, seen []string, last []bool, depth, m
 	}
 	for i, c := range callees {
 		isLast := i == len(callees)-1
-		*buf = append(*buf, treePrefix(last, isLast, ctrlGreen)+c)
+		*buf = append(*buf, treePrefix(last, isLast, ctrlGreen)+colorName(c))
 		if slices.Contains(seen, c) {
 			continue
 		}
@@ -184,7 +199,7 @@ func printFiltered(g *graph.Graph, fun string, keep map[string]bool, seen []stri
 	}
 	for i, c := range vis {
 		isLast := i == len(vis)-1
-		*buf = append(*buf, treePrefix(last, isLast, ctrlGreen)+c)
+		*buf = append(*buf, treePrefix(last, isLast, ctrlGreen)+colorName(c))
 		if slices.Contains(seen, c) {
 			continue
 		}
@@ -209,7 +224,7 @@ func printIgnored(g *graph.Graph, fun string, ignoreKwds, seen []string, last []
 	}
 	for i, c := range vis {
 		isLast := i == len(vis)-1
-		*buf = append(*buf, treePrefix(last, isLast, ctrlGreen)+c)
+		*buf = append(*buf, treePrefix(last, isLast, ctrlGreen)+colorName(c))
 		if slices.Contains(seen, c) {
 			continue
 		}
@@ -230,7 +245,7 @@ func printRefs(g *graph.Graph, fun string, seen []string, last []bool, depth, ma
 	}
 	for i, r := range refs {
 		isLast := i == len(refs)-1
-		*buf = append(*buf, treePrefix(last, isLast, ctrlRed)+r)
+		*buf = append(*buf, treePrefix(last, isLast, ctrlRed)+colorName(r))
 		if slices.Contains(seen, r) {
 			continue
 		}
