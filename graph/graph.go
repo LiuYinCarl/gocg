@@ -29,7 +29,7 @@ type Stats struct {
 	Warnings  []string
 }
 
-const cacheVersion = 1
+const cacheVersion = 2
 
 func Build(dir string, excludePrefixes []string, noCache bool) (*Graph, *Stats, error) {
 	absDir, err := filepath.Abs(dir)
@@ -115,14 +115,7 @@ func buildFromSource(absDir string, excludePrefixes []string) (*Graph, *Stats, e
 	displayCache := make(map[string]string)
 	excludeCache := make(map[string]bool)
 
-	funcs := make(map[*ssa.Function]bool)
-	for _, pkg := range prog.AllPackages() {
-		for _, member := range pkg.Members {
-			if fn, ok := member.(*ssa.Function); ok {
-				funcs[fn] = true
-			}
-		}
-	}
+	funcs := ssautil.AllFunctions(prog)
 
 	cg := vta.CallGraph(funcs, nil)
 

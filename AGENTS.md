@@ -60,7 +60,8 @@ type Stats struct {
 - Project containment (`pathInDir`) uses `filepath.Rel`, not string prefix matching — cross-platform safe (volume names, separators) and immune to `/foo/bar2` matching `/foo/bar`. Note: comparison is case-sensitive, so a differently-cased path spelling on a case-insensitive filesystem (Windows/macOS) won't match.
 - Display names are the map keys: two distinct functions that shorten to the same name have their edges merged. Deliberate usability trade-off.
 - `matchesExclude(name, prefixes)` does **substring** matching against the full `ssa.Function.String()` output, not just the import path. Any substring match in the full function name triggers exclusion.
-- Cache stores the serialized `cachePayload` JSON (including `Warnings`, so cached loads still surface them). Cache version is hardcoded (`const cacheVersion = 1`). Bumping it invalidates all existing caches.
+- Cache stores the serialized `cachePayload` JSON (including `Warnings`, so cached loads still surface them). Cache version is hardcoded (`const cacheVersion = 2`) and participates in the cache filename hash. Bumping it invalidates all existing caches — required whenever graph construction semantics change.
+- VTA roots are `ssautil.AllFunctions(prog)` — **not** `pkg.Members`. `vta.CallGraph` only computes out-edges for functions in the root set, and `pkg.Members` omits methods, anonymous functions (`fn$1`), and generic instantiations; using it left most methods as leaf nodes with no call chain. `AllFunctions` covers methods (via method sets), closures (via operand walk), and instantiations.
 - `refgraph` is populated for **every** edge (not just project-internal callees), so reverse lookups can show external callers.
 
 **Performance notes:**
