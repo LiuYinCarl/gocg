@@ -29,7 +29,7 @@ type Stats struct {
 	Warnings  []string
 }
 
-const cacheVersion = 2
+const cacheVersion = 3
 
 func Build(dir string, excludePrefixes []string, noCache bool) (*Graph, *Stats, error) {
 	absDir, err := filepath.Abs(dir)
@@ -354,7 +354,6 @@ func ClearCache(dir string) (int, error) {
 
 func buildShortMap(pkgs []*packages.Package) map[string]string {
 	pathToName := make(map[string]string)
-	nameCount := make(map[string]int)
 	seen := make(map[string]bool)
 	var collect func(pkg *packages.Package)
 	collect = func(pkg *packages.Package) {
@@ -364,7 +363,6 @@ func buildShortMap(pkgs []*packages.Package) map[string]string {
 		seen[pkg.ID] = true
 		if pkg.PkgPath != "" && pkg.Name != "" {
 			pathToName[pkg.PkgPath] = pkg.Name
-			nameCount[pkg.Name]++
 		}
 		for _, imp := range pkg.Imports {
 			collect(imp)
@@ -375,19 +373,72 @@ func buildShortMap(pkgs []*packages.Package) map[string]string {
 	}
 
 	m := make(map[string]string)
+	byName := make(map[string][]string)
 	for path, name := range pathToName {
-		if nameCount[name] > 1 {
-			parts := strings.Split(path, "/")
-			if len(parts) >= 2 {
-				m[path] = parts[len(parts)-2] + "/" + name
-			} else {
-				m[path] = path
-			}
-		} else {
-			m[path] = name
+		byName[name] = append(byName[name], path)
+	}
+	for name, paths := range byName {
+		if len(paths) == 1 {
+			m[paths[0]] = name
+			continue
 		}
+		resolveAmbiguous(m, name, paths)
 	}
 	return m
+}
+
+func resolveAmbiguous(m map[string]string, name string, paths []string) {
+	partsOf := make(map[string][]string, len(paths))
+	maxSeg := 0
+	for _, p := range paths {
+		parts := strings.Split(p, "/")
+		partsOf[p] = parts
+		if len(parts) > maxSeg {
+			maxSeg = len(parts)
+		}
+	}
+	candidate := func(p string, level int) string {
+		parts := partsOf[p]
+		switch level {
+		case 0:
+			if len(parts) >= 2 {
+				return parts[len(parts)-2] + "/" + name
+			}
+			return p
+		case 1:
+			return parts[len(parts)-1] + "/" + name
+		default:
+			k := level
+			if k > len(parts) {
+				k = len(parts)
+			}
+			return strings.Join(parts[len(parts)-k:], "/")
+		}
+	}
+	assigned := make(map[string]bool)
+	unresolved := paths
+	for level := 0; len(unresolved) > 0 && level <= maxSeg; level++ {
+		count := make(map[string]int)
+		cand := make(map[string]string)
+		for _, p := range unresolved {
+			c := candidate(p, level)
+			cand[p] = c
+			count[c]++
+		}
+		var next []string
+		for _, p := range unresolved {
+			if count[cand[p]] == 1 && !assigned[cand[p]] {
+				m[p] = cand[p]
+				assigned[cand[p]] = true
+			} else {
+				next = append(next, p)
+			}
+		}
+		unresolved = next
+	}
+	for _, p := range unresolved {
+		m[p] = p
+	}
 }
 
 func funcDisplayName(full string, shortMap map[string]string, sortedPaths []string) string {

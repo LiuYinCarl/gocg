@@ -52,15 +52,15 @@ type Stats struct {
 - Accepts pre-sorted paths (longest-first) to avoid repeated sorting per call
 - Replaces full import paths with short package names
 - If only one package uses a given name → just `pkgname`
-- If multiple share the same name → `parent/pkgname`
+- If multiple share the same name → `resolveAmbiguous` picks the first unique candidate per path: `parentdir/pkgname` (legacy), then `lastdir/pkgname` (handles versioned dirs like `semconv/v1.37.0`), then progressively longer path suffixes (`crush/internal/client`), finally the full path. Display names are guaranteed unique per import path.
 
 **Gotchas:**
 - Only functions with source files under the project directory are expanded as **callers**. External callees are still included as leaf nodes — they aren't filtered from other callers' out-edges.
 - The project directory is canonicalized with `filepath.Abs` + `filepath.EvalSymlinks` in both `Build` and `ClearCache`, so symlinked aliases (e.g. macOS `/tmp` → `/private/tmp`) share one cache entry and containment checks stay consistent.
 - Project containment (`pathInDir`) uses `filepath.Rel`, not string prefix matching — cross-platform safe (volume names, separators) and immune to `/foo/bar2` matching `/foo/bar`. Note: comparison is case-sensitive, so a differently-cased path spelling on a case-insensitive filesystem (Windows/macOS) won't match.
-- Display names are the map keys: two distinct functions that shorten to the same name have their edges merged. Deliberate usability trade-off.
+- Display names are the map keys. Since `resolveAmbiguous`, names are unique per import path; identically-printing generic instantiations (same `fn.String()`) still share one entry, which is harmless — they have identical edges.
 - `matchesExclude(name, prefixes)` does **substring** matching against the full `ssa.Function.String()` output, not just the import path. Any substring match in the full function name triggers exclusion.
-- Cache stores the serialized `cachePayload` JSON (including `Warnings`, so cached loads still surface them). Cache version is hardcoded (`const cacheVersion = 2`) and participates in the cache filename hash. Bumping it invalidates all existing caches — required whenever graph construction semantics change.
+- Cache stores the serialized `cachePayload` JSON (including `Warnings`, so cached loads still surface them). Cache version is hardcoded (`const cacheVersion = 3`) and participates in the cache filename hash. Bumping it invalidates all existing caches — required whenever graph construction semantics change.
 - VTA roots are `ssautil.AllFunctions(prog)` — **not** `pkg.Members`. `vta.CallGraph` only computes out-edges for functions in the root set, and `pkg.Members` omits methods, anonymous functions (`fn$1`), and generic instantiations; using it left most methods as leaf nodes with no call chain. `AllFunctions` covers methods (via method sets), closures (via operand walk), and instantiations.
 - `refgraph` is populated for **every** edge (not just project-internal callees), so reverse lookups can show external callers.
 
