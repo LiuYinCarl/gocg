@@ -52,7 +52,7 @@ type Stats struct {
 - Accepts pre-sorted paths (longest-first) to avoid repeated sorting per call
 - Replaces full import paths with short package names
 - If only one package uses a given name → just `pkgname`
-- If multiple share the same name → `resolveAmbiguous` picks the first unique candidate per path: `parentdir/pkgname` (legacy), then `lastdir/pkgname` (handles versioned dirs like `semconv/v1.37.0`), then progressively longer path suffixes (`crush/internal/client`), finally the full path. Display names are guaranteed unique per import path.
+- If multiple share the same name → `resolveAmbiguous` picks the first unique candidate per path: `parentdir/pkgname` (legacy), then `lastdir/pkgname` (handles versioned dirs like `semconv/v1.37.0`), then progressively longer path suffixes (`crush/internal/client`), finally the full path. Candidates are deduplicated against a global `used` set (groups processed in sorted order, so output is deterministic) — display names are unique across all import paths.
 
 **Gotchas:**
 - Only functions with source files under the project directory are expanded as **callers**. External callees are still included as leaf nodes — they aren't filtered from other callers' out-edges.

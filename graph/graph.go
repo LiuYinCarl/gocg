@@ -377,17 +377,27 @@ func buildShortMap(pkgs []*packages.Package) map[string]string {
 	for path, name := range pathToName {
 		byName[name] = append(byName[name], path)
 	}
+	used := make(map[string]bool)
 	for name, paths := range byName {
 		if len(paths) == 1 {
 			m[paths[0]] = name
-			continue
+			used[name] = true
 		}
-		resolveAmbiguous(m, name, paths)
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if paths := byName[name]; len(paths) > 1 {
+			resolveAmbiguous(m, used, name, paths)
+		}
 	}
 	return m
 }
 
-func resolveAmbiguous(m map[string]string, name string, paths []string) {
+func resolveAmbiguous(m map[string]string, used map[string]bool, name string, paths []string) {
 	partsOf := make(map[string][]string, len(paths))
 	maxSeg := 0
 	for _, p := range paths {
@@ -415,7 +425,6 @@ func resolveAmbiguous(m map[string]string, name string, paths []string) {
 			return strings.Join(parts[len(parts)-k:], "/")
 		}
 	}
-	assigned := make(map[string]bool)
 	unresolved := paths
 	for level := 0; len(unresolved) > 0 && level <= maxSeg; level++ {
 		count := make(map[string]int)
@@ -427,9 +436,9 @@ func resolveAmbiguous(m map[string]string, name string, paths []string) {
 		}
 		var next []string
 		for _, p := range unresolved {
-			if count[cand[p]] == 1 && !assigned[cand[p]] {
+			if count[cand[p]] == 1 && !used[cand[p]] {
 				m[p] = cand[p]
-				assigned[cand[p]] = true
+				used[cand[p]] = true
 			} else {
 				next = append(next, p)
 			}
@@ -437,7 +446,12 @@ func resolveAmbiguous(m map[string]string, name string, paths []string) {
 		unresolved = next
 	}
 	for _, p := range unresolved {
-		m[p] = p
+		if !used[p] {
+			m[p] = p
+			used[p] = true
+		} else {
+			m[p] = p + "/" + name
+		}
 	}
 }
 
